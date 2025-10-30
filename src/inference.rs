@@ -16,16 +16,20 @@ use crate::transform::embedder_client::EmbedderClient;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use crate::query_repo_from_args;
 
 const QDRANT_URL: &str = "http://localhost:6333";
 const EMBED_MODEL: &str = "text-embedding-embeddinggemma-300m"; // must match what you used to index
 const VECTOR_SIZE: usize = 768;
-const COLLECTION: &str = "thing"; // or pass dynamically
+const COLLECTION: &str = "gobiz"; // or pass dynamically
 
-pub async fn inference(query: &str, k: u8) -> Result<Vec<QdrantPoint>> {
+pub async fn inference() -> Result<Vec<QdrantPoint>> {
+    let (query, repo) = query_repo_from_args()?;
+    let repo = repo.trim();
+
     // 1. embed query
     let embedder = EmbedderClient::new(EMBED_MODEL, Some(VECTOR_SIZE))?;
-    let vec = embedder.embed_text(query).await?;
+    let vec = embedder.embed_text(&query.trim()).await?;
 
     // 2. search Qdrant
     let url = format!("{QDRANT_URL}/collections/{COLLECTION}/points/query");
@@ -33,9 +37,18 @@ pub async fn inference(query: &str, k: u8) -> Result<Vec<QdrantPoint>> {
     //     vector: vec,
     //     limit: k as usize,
     // };
-    let body = json!(
-    { "query": { "recommend":{
+    let body = json!({
+        "query": {
+            "recommend": {
                 "positive": [vec]
+            }
+        },
+        "filter": {
+            "must": {
+                "key": "repo",
+                "match": {
+                    "value": repo
+                },
             }
         }
     });
@@ -54,11 +67,7 @@ pub async fn inference(query: &str, k: u8) -> Result<Vec<QdrantPoint>> {
     }
 
     let result: QdrantSearchResponse = resp.json().await?;
-    let docs = result
-        .result
-        .points
-        .into_iter()
-        .collect();
+    let docs = result.result.points.into_iter().collect();
 
     Ok(docs)
 }

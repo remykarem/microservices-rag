@@ -27,10 +27,11 @@
 //!
 //! This file only depends on tree-sitter and serde/thiserror; it does not perform I/O.
 
+use tree_sitter_javascript::language;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use thiserror::Error;
-use tree_sitter::{Node, Parser, Point, Range};
+use tree_sitter::{Language, Node, Parser, Point, Range};
 
 #[derive(Debug, Error)]
 pub enum RustParserError {
@@ -77,26 +78,44 @@ pub struct Document {
 }
 
 /// Primary parser type
-pub struct RustParser {
+pub struct CodeParser {
     parser: Parser,
 }
 
-pub enum Language {
+pub enum ParseLanguage {
     Rust,
     Kotlin,
+    JavaScript,
+    TypeScript,
 }
 
-impl RustParser {
-    pub fn new(language: Language) -> Result<Self, RustParserError> {
+
+impl CodeParser {
+    pub fn new(language: ParseLanguage) -> Result<Self, RustParserError> {
         let mut parser = Parser::new();
 
-        let lang = match language {
-            Language::Rust => tree_sitter_rust::LANGUAGE,
-            Language::Kotlin => tree_sitter_kotlin::LANGUAGE,
+        match language {
+            ParseLanguage::Rust => {
+                parser
+                    .set_language(&tree_sitter_rust::language().into())
+                    .map_err(|_| RustParserError::ParseFailed)?;
+            }
+            ParseLanguage::JavaScript => {
+                parser
+                    .set_language(&tree_sitter_javascript::language().into())
+                    .map_err(|_| RustParserError::ParseFailed)?;
+            }
+            ParseLanguage::TypeScript => {
+                parser
+                    .set_language(&tree_sitter_typescript::language_typescript().into())
+                    .map_err(|_| RustParserError::ParseFailed)?;
+            }
+            ParseLanguage::Kotlin => {
+                parser
+                    .set_language(&tree_sitter_kotlin::language())
+                    .map_err(|_| RustParserError::ParseFailed)?;
+            },
         };
-        parser
-            .set_language(&lang.into())
-            .map_err(|_| RustParserError::ParseFailed)?;
         Ok(Self { parser })
     }
 
@@ -499,7 +518,7 @@ mod tests {
 /// more
 fn foo() {}
 "#;
-        let mut p = RustParser::new(Language::Rust).unwrap();
+        let mut p = CodeParser::new(ParseLanguage::Rust).unwrap();
         let docs = p
             .parse_file("repo", "src/lib.rs", src, false)
             .expect("parse");
@@ -524,7 +543,7 @@ impl A {
 
 fn baz() {}
 "#;
-        let mut p = RustParser::new(Language::Rust).unwrap();
+        let mut p = CodeParser::new(ParseLanguage::Rust).unwrap();
         let docs = p.parse_file("repo", "a.rs", src, false).expect("parse");
 
         let meth = docs
@@ -540,7 +559,7 @@ fn baz() {}
     #[test]
     fn test_filename_document() {
         let src = "fn x() {}\n";
-        let mut p = RustParser::new(Language::Rust).unwrap();
+        let mut p = CodeParser::new(ParseLanguage::Rust).unwrap();
         let docs = p.parse_file("r", "src/main.rs", src, true).expect("ok");
         let file = docs
             .iter()

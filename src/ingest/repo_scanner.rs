@@ -114,7 +114,7 @@ fn should_include(entry: &DirEntry) -> bool {
         return false;
     }
     match path.extension().and_then(|x| x.to_str()) {
-        Some("rs") | Some("kt") => true,
+        Some("rs") | Some("kt") | Some("js") | Some("ts") => true,
         _ => false,
     }
 }

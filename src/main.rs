@@ -13,6 +13,7 @@
 //!
 //! This loop is idempotent. We re-index on each cycle (static update behavior).
 
+mod generative;
 mod index;
 mod inference;
 mod ingest;
@@ -24,11 +25,13 @@ use index::qdrant_schema::{Distance, QdrantSchema};
 use ingest::repo_scanner::ProjectScanner;
 use transform::doc_normalizer::{DocNormalizer, NormalizedDoc};
 
+use crate::generative::call_lm_studio_model;
 use crate::inference::inference;
-use crate::ingest::rust_parser::{Language, RustParser};
+use crate::ingest::rust_parser::{CodeParser, ParseLanguage};
 use crate::transform::embedder_client::EmbedderClient;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use serde_json::json;
+use std::time::Duration;
 use std::{env, path::PathBuf};
 // -------- hardcoded config (per your requirements) --------
 
@@ -49,9 +52,20 @@ const RESCAN_INTERVAL_SECS: u64 = 600; // 10 minutes (safe default)
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let docs = inference("what is the default buffer", 10).await?;
-    println!("{:#?}", docs);
+    // let docs = inference().await?;
+    // println!("{:#?}", docs);
     // index().await?;
+    call_lm_studio_model(
+        "http://localhost:1234/v1/chat/completions",
+        "lm-studio",            // LM Studio typically uses this as API key
+        "qwen/qwen3-coder-30b", // Your model name
+        "what is rust dyn Error",
+        true, // stream_response
+    )
+    .await
+    .expect("TODO: panic message");
+
+    tokio::time::sleep(Duration::from_secs(300)).await;
     Ok(())
 }
 
@@ -125,20 +139,34 @@ async fn tick_once(
             }
         };
         if files.is_empty() {
-            eprintln!("[scan_repo] no .rs files found");
-            return;
+            eprintln!("[scan_repo] no files found");
+            continue;
         }
-        eprintln!("[scan_repo] {} files", files.len());
+        eprintln!("[scan_repo] {repo_root:?}; {} files", files.len());
 
         // 3) parse → documents
-        let mut rust_parser = match RustParser::new(Language::Rust) {
+        let mut rust_parser = match CodeParser::new(ParseLanguage::Rust) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("[parser] init error: {e:#}");
                 return;
             }
         };
-        let mut kotlin_parser = match RustParser::new(Language::Kotlin) {
+        let mut kotlin_parser = match CodeParser::new(ParseLanguage::Kotlin) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[parser] init error: {e:#}");
+                return;
+            }
+        };
+        let mut ts_parser = match CodeParser::new(ParseLanguage::TypeScript) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[parser] init error: {e:#}");
+                return;
+            }
+        };
+        let mut js_parser = match CodeParser::new(ParseLanguage::JavaScript) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("[parser] init error: {e:#}");
@@ -149,12 +177,38 @@ async fn tick_once(
         let mut all_docs = Vec::new();
         for f in &files {
             if f.file_path.ends_with("rs") {
-                match rust_parser.parse_file(&f.repo, &f.file_path, &f.source, INCLUDE_FILENAME_DOC) {
+                match rust_parser.parse_file(&f.repo, &f.file_path, &f.source, INCLUDE_FILENAME_DOC)
+                {
                     Ok(mut docs) => all_docs.append(&mut docs),
                     Err(e) => eprintln!("[parse_file] {}: {e:#}", f.file_path),
                 }
             } else if f.file_path.ends_with("kt") {
-                match kotlin_parser.parse_file(&f.repo, &f.file_path, &f.source, INCLUDE_FILENAME_DOC) {
+                match kotlin_parser.parse_file(
+                    &f.repo,
+                    &f.file_path,
+                    &f.source,
+                    INCLUDE_FILENAME_DOC,
+                ) {
+                    Ok(mut docs) => all_docs.append(&mut docs),
+                    Err(e) => eprintln!("[parse_file] {}: {e:#}", f.file_path),
+                }
+            } else if f.file_path.ends_with("ts") {
+                match kotlin_parser.parse_file(
+                    &f.repo,
+                    &f.file_path,
+                    &f.source,
+                    INCLUDE_FILENAME_DOC,
+                ) {
+                    Ok(mut docs) => all_docs.append(&mut docs),
+                    Err(e) => eprintln!("[parse_file] {}: {e:#}", f.file_path),
+                }
+            } else if f.file_path.ends_with("js") {
+                match kotlin_parser.parse_file(
+                    &f.repo,
+                    &f.file_path,
+                    &f.source,
+                    INCLUDE_FILENAME_DOC,
+                ) {
                     Ok(mut docs) => all_docs.append(&mut docs),
                     Err(e) => eprintln!("[parse_file] {}: {e:#}", f.file_path),
                 }
@@ -276,6 +330,14 @@ fn repo_root_from_args() -> Result<PathBuf> {
         env::current_dir().context("failed to get current dir")?
     };
     Ok(root)
+}
+
+pub fn query_repo_from_args() -> Result<(String, String)> {
+    let mut args = env::args().skip(1);
+    let query = args.next().unwrap();
+    let repo = args.next().unwrap();
+
+    Ok((query, repo))
 }
 
 fn repo_name(root: &PathBuf) -> Result<String> {

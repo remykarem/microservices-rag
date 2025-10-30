@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.24", features = ["json", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.17"
 serde_json = "1.0.145"
@@ -12,12 +12,15 @@ tokio = { version = "1.48.0", features = ["rt", "rt-multi-thread", "macros", "si
 sha2 = "0.11.0-rc.2"
 uuid = { version = "1.18.1", features = ["v5"] }
 hex = "0.4.3"
-tree-sitter = "0.22"
-tree-sitter-rust = "0.24.0"
+tree-sitter = "0.21"
+tree-sitter-rust = "0.21.0"
+tree-sitter-javascript = "0.21.0"
+tree-sitter-typescript = "0.21.0"
 ignore = "0.4.24"
 chrono = "0.4.42"
 anyhow = "1.0.100"
 tree-sitter-kotlin = "0.3.8"
+tokio-stream = "0.1.17"
 
 [dev-dependencies]
 rstest = "0.26.1"
