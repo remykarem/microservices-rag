@@ -1,6 +1,9 @@
+use std::io;
+use std::io::Write;
 use tokio_stream::StreamExt;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ChatCompletionChunk {
@@ -16,23 +19,23 @@ struct ChatCompletionChunk {
 struct Choice {
     index: u32,
     delta: Delta,
-    logprobs: Option<()>, // null in JSON
+    logprobs: Option<()>,      // null in JSON
     finish_reason: Option<()>, // null in JSON
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Delta {
+struct DeltaContent {
     content: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum Delta {
+    String(DeltaContent),
+    Object(Value),
+}
 
-pub async fn call_lm_studio_model(
-    api_url: &str,
-    api_key: &str,
-    model_name: &str,
-    prompt: &str,
-    stream_response: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn ask_llm(api_url: &str, api_key: &str, model_name: &str, prompt: &str) {
     let client = reqwest::Client::new();
 
     // Prepare the request body
@@ -44,12 +47,8 @@ pub async fn call_lm_studio_model(
                 "content": prompt
             }
         ],
-        "stream": stream_response
+        "stream": true
     });
-
-    // Print the request body
-    println!("Request Body:");
-    println!("{}", serde_json::to_string_pretty(&json_body)?);
 
     // Make the request
     let response = client
@@ -58,18 +57,10 @@ pub async fn call_lm_studio_model(
         .header("Content-Type", "application/json")
         .json(&json_body)
         .send()
-        .await?;
+        .await
+        .unwrap();
 
-    if stream_response {
-        // Handle streaming response
-        handle_streaming_response(response).await?;
-    } else {
-        // Handle regular response
-        let response_text = response.text().await?;
-        println!("Response:\n{}", response_text);
-    }
-
-    Ok(())
+    handle_streaming_response(response).await.unwrap();
 }
 
 async fn handle_streaming_response(
@@ -79,13 +70,21 @@ async fn handle_streaming_response(
     let mut stream = response.bytes_stream();
 
     // Process the stream
+    let mut i = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         if let Ok(s) = std::str::from_utf8(&chunk) {
             // Handle SSE format (data: prefix)
             if s.starts_with("data:") {
-                let stuff: ChatCompletionChunk = serde_json::from_str(s.trim_start_matches("data:").trim())?;
-                print!("{}", stuff.choices[0].delta.content);
+                let stuff: ChatCompletionChunk =
+                    serde_json::from_str(s.trim_start_matches("data:").trim())?;
+                if let Delta::String(delta) = &stuff.choices[0].delta {
+                    print!("{}", delta.content);
+                    if i % 3 == 0 {
+                        io::stdout().flush().unwrap();
+                        i += 1;
+                    }
+                }
             } else {
                 println!("{}", s);
             }

@@ -12,13 +12,13 @@
 //! Example:
 //! ```ignore
 //! use crate::embedder_client::EmbedderClient;
-//! 
+//!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
 //!   let client = EmbedderClient::new("text-embedding-3-small", None)?;
 //!   let vec = client.embed_text("hello world").await?;
 //!   println!("dim = {}", vec.len());
-//! 
+//!
 //!   Ok(())
 //! }
 //! ```
@@ -101,10 +101,7 @@ impl EmbedderClient {
     /// Embed a single text string.
     pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>, EmbedError> {
         let mut out = self.embed_texts_raw(&[text]).await?;
-        let first = out
-            .pop()
-            .ok_or(EmbedError::EmptyResponse)?
-            .embedding;
+        let first = out.pop().ok_or(EmbedError::EmptyResponse)?.embedding;
 
         if let Some(expected) = self.expected_dim {
             if first.len() != expected {

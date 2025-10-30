@@ -11,47 +11,55 @@
 //! - Same model + vector size as your indexer
 //! - `Document` is identical to what you indexed
 
-use crate::ingest::rust_parser::Document;
-use crate::transform::embedder_client::EmbedderClient;
+use crate::client::embedder_client::EmbedderClient;
+use crate::client::llm_client::ask_llm;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use crate::query_repo_from_args;
+use serde_json::{Value, json};
 
 const QDRANT_URL: &str = "http://localhost:6333";
 const EMBED_MODEL: &str = "text-embedding-embeddinggemma-300m"; // must match what you used to index
 const VECTOR_SIZE: usize = 768;
 const COLLECTION: &str = "gobiz"; // or pass dynamically
 
-pub async fn inference() -> Result<Vec<QdrantPoint>> {
-    let (query, repo) = query_repo_from_args()?;
+pub async fn rag(query: &str, repo: &str) -> Result<Vec<QdrantPoint>> {
     let repo = repo.trim();
 
     // 1. embed query
     let embedder = EmbedderClient::new(EMBED_MODEL, Some(VECTOR_SIZE))?;
-    let vec = embedder.embed_text(&query.trim()).await?;
+    let vec = embedder.embed_text(query.trim()).await?;
 
     // 2. search Qdrant
     let url = format!("{QDRANT_URL}/collections/{COLLECTION}/points/query");
-    // let body = QdrantSearchRequest {
-    //     vector: vec,
-    //     limit: k as usize,
-    // };
-    let body = json!({
-        "query": {
-            "recommend": {
-                "positive": [vec]
-            }
-        },
-        "filter": {
-            "must": {
-                "key": "repo",
-                "match": {
-                    "value": repo
-                },
-            }
-        }
-    });
+    let body = if repo == "*" {
+        json!({
+            "query": {
+                "recommend": {
+                    "positive": [vec]
+                }
+            },
+            "filter": {
+                "must": {
+                    "key": "repo",
+                    "match": {
+                        "value": repo
+                    },
+                }
+            },
+            "with_payload": ["code", "repo"],
+            "limit": 3,
+        })
+    } else {
+        json!({
+            "query": {
+                "recommend": {
+                    "positive": [vec]
+                }
+            },
+            "with_payload": ["code", "repo"],
+            "limit": 3,
+        })
+    };
 
     let resp = reqwest::Client::new()
         .post(&url)
@@ -67,7 +75,32 @@ pub async fn inference() -> Result<Vec<QdrantPoint>> {
     }
 
     let result: QdrantSearchResponse = resp.json().await?;
+
+    // Get response
     let docs = result.result.points.into_iter().collect();
+
+    // "Augment" response with natural language
+    let prompt = format!(
+        r#"so i embedded the following query to an embedding model:
+
+{query}
+
+and got the following result:
+
+------------start result------------
+{docs:#?}
+------------end result------------
+
+so... can you give me a response to my query?
+    "#
+    );
+    ask_llm(
+        "http://localhost:1234/v1/chat/completions",
+        "lm-studio",            // LM Studio typically uses this as API key
+        "qwen/qwen3-coder-30b", // Your model name
+        &prompt,
+    )
+    .await;
 
     Ok(docs)
 }
@@ -92,4 +125,5 @@ struct QdrantPoints {
 pub struct QdrantPoint {
     id: String,
     score: f32,
+    payload: Value,
 }
