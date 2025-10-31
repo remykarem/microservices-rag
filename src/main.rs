@@ -5,7 +5,6 @@ mod index;
 mod indexing;
 mod inference;
 pub mod ingest;
-mod server;
 mod terminal;
 pub mod transform;
 
@@ -44,6 +43,5 @@ impl Display for Mode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // terminal::terminal().await
-    server::server().await
+    terminal::terminal().await
 }
