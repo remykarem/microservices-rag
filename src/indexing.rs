@@ -13,21 +13,25 @@
 //!
 //! This loop is idempotent. We re-index on each cycle (static update behavior).
 
-use std::env;
-use std::path::PathBuf;
-use anyhow::{Context, Result};
-use serde_json::json;
 use crate::client::embedder_client::EmbedderClient;
 use crate::client::qdrant_client::{PointWrite, QdrantClient};
-use crate::{EMBED_BASE_MODEL, EMBED_BATCH, INCLUDE_FILENAME_DOC, QDRANT_URL, UPSERT_BATCH, UPSERT_RETRIES, VECTOR_SIZE};
 use crate::index::id_generator::deterministic_point_id;
 use crate::index::qdrant_schema::{Distance, QdrantSchema};
 use crate::ingest::repo_scanner::ProjectScanner;
 use crate::ingest::rust_parser::{CodeParser, ParseLanguage};
 use crate::transform::doc_normalizer::{DocNormalizer, NormalizedDoc};
+use crate::{
+    EMBED_BASE_MODEL, EMBED_BATCH, INCLUDE_FILENAME_DOC, QDRANT_URL, UPSERT_BATCH, UPSERT_RETRIES,
+    VECTOR_SIZE,
+};
+use anyhow::{Context, Result};
+use indicatif::{ProgressBar, ProgressIterator, ProgressStyle};
+use serde_json::json;
+use std::env;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const DISTANCE: Distance = Distance::Cosine;
-
 
 pub async fn index(p: &str) -> Result<()> {
     let root = PathBuf::from(p);
@@ -44,21 +48,6 @@ pub async fn index(p: &str) -> Result<()> {
     let qdrant = QdrantClient::new()?;
     let embedder = EmbedderClient::new(EMBED_BASE_MODEL, Some(VECTOR_SIZE))?;
 
-    // daemon loop; Ctrl+C to exit
-    // let mut interrupt = Box::pin(tokio::signal::ctrl_c());
-    // loop {
-    //     tokio::select! {
-    //         _ = &mut interrupt => {
-    //             eprintln!("Received Ctrl+C. Exiting.");
-    //             break;
-    //         }
-    //         _ = tick_once(&schema, &qdrant, &embedder, &root, &collection) => {
-    //             // finished one indexing pass — sleep, then go again
-    //             tokio::time::sleep(Duration::from_secs(RESCAN_INTERVAL_SECS)).await;
-    //         }
-    //     }
-    // }
-
     tick_once(&schema, &qdrant, &embedder, &root, &collection).await;
 
     Ok(())
@@ -68,7 +57,7 @@ async fn tick_once(
     schema: &QdrantSchema,
     qdrant: &QdrantClient,
     embedder: &EmbedderClient,
-    root: &PathBuf,
+    root: &Path,
     collection: &str,
 ) {
     // 1) ensure collection
@@ -102,7 +91,7 @@ async fn tick_once(
             eprintln!("[scan_repo] no files found");
             continue;
         }
-        eprintln!("[scan_repo] {repo_root:?}; {} files", files.len());
+        eprintln!("[1/4] Scan repo {repo_root:?}; {} files", files.len());
 
         // 3) parse → documents
         let mut rust_parser = match CodeParser::new(ParseLanguage::Rust) {
@@ -135,7 +124,7 @@ async fn tick_once(
         };
 
         let mut all_docs = Vec::new();
-        for f in &files {
+        for f in files.into_iter().progress() {
             if f.file_path.ends_with("rs") {
                 match rust_parser.parse_file(&f.repo, &f.file_path, &f.source, INCLUDE_FILENAME_DOC)
                 {
@@ -178,7 +167,7 @@ async fn tick_once(
             eprintln!("[parse] yielded 0 documents");
             return;
         }
-        eprintln!("[parse] {} documents", all_docs.len());
+        eprintln!("[2/4] Normalising {} documents", all_docs.len());
 
         // 4) normalize
         let normalizer = DocNormalizer::default();
@@ -186,13 +175,21 @@ async fn tick_once(
             .into_iter()
             .map(|d| normalizer.normalize(d))
             .collect();
-        eprintln!("[normalize] {} normalized docs", norm_docs.len());
+        eprintln!("[3/4] Embedding {} docs", norm_docs.len());
+
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(ProgressStyle::with_template("{prefix} {spinner} {wide_msg}").unwrap());
+        pb.set_prefix("[3/4]");
+        pb.set_message("Embedding and upserting...");
+        pb.enable_steady_tick(Duration::from_millis(100));
 
         // 5) embed + 6) upsert (batched)
         if let Err(e) = embed_and_upsert(collection, &norm_docs, embedder, qdrant).await {
             eprintln!("[index] error: {e:#}");
             return;
         }
+
+        pb.finish_with_message("Done!");
 
         eprintln!(
             "[index] done: upserted {} documents into '{}'",
@@ -249,6 +246,8 @@ async fn embed_and_upsert(
                 }
             })
             .collect();
+
+        eprintln!("[4/4] Upserting [{start}..{end}");
 
         // upsert (may split further if points > UPSERT_BATCH)
         qdrant

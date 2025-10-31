@@ -12,8 +12,8 @@ const EMBED_BASE_MODEL: &str = "text-embedding-embeddinggemma-300m"; // change a
 const VECTOR_SIZE: usize = 768; // must match model
 
 const INCLUDE_FILENAME_DOC: bool = true;
-const EMBED_BATCH: usize = 64;
-const UPSERT_BATCH: usize = 64;
+const EMBED_BATCH: usize = 512;
+const UPSERT_BATCH: usize = 512;
 const UPSERT_RETRIES: usize = 3;
 
 // daemon-ish loop controls
