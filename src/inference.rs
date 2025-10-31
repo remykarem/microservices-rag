@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 const QDRANT_URL: &str = "http://localhost:6333";
 const EMBED_MODEL: &str = "text-embedding-embeddinggemma-300m"; // must match what you used to index
 const VECTOR_SIZE: usize = 768;
-const COLLECTION: &str = "gobiz"; // or pass dynamically
+const COLLECTION: &str = ""; // or pass dynamically
 
 pub async fn rag(query: &str, repo: &str) -> Result<Vec<QdrantPoint>> {
     let repo = repo.trim();

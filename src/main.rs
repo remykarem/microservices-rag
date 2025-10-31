@@ -5,6 +5,8 @@ mod index;
 mod indexing;
 mod inference;
 pub mod ingest;
+mod server;
+mod terminal;
 pub mod transform;
 
 use crate::client::llm_client::ask_llm;
@@ -42,35 +44,6 @@ impl Display for Mode {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // First choice: Index or Query
-    let mode = Select::new("Select operation:", vec![Mode::Query, Mode::Index]).prompt()?;
-
-    match mode {
-        Mode::Index => {
-            let path = Text::new("Enter path to index:").prompt()?;
-            indexing::index(&path).await?;
-        }
-        Mode::Query => {
-            let prompt = Text::new("Enter your query:").prompt()?;
-            let repo = Select::new(
-                "Enter repository name:",
-                vec!["*"],
-            )
-            .prompt()?;
-            let docs = rag(&prompt, repo).await?;
-            println!("{:#?}", docs);
-        }
-        Mode::Thing => {
-            let prompt = Text::new("Prompt:").prompt()?;
-            ask_llm(
-                "http://localhost:1234/v1/chat/completions",
-                "lm-studio",            // LM Studio typically uses this as API key
-                "qwen/qwen3-coder-30b", // Your model name
-                &prompt,
-            )
-            .await;
-        }
-    }
-
-    Ok(())
+    // terminal::terminal().await
+    server::server().await
 }

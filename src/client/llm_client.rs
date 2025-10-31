@@ -6,31 +6,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize)]
-struct ChatCompletionChunk {
+pub struct ChatCompletionChunk {
     id: String,
     object: String,
     created: u64,
     model: String,
     system_fingerprint: String,
-    choices: Vec<Choice>,
+    pub choices: Vec<Choice>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct Choice {
+pub struct Choice {
     index: u32,
-    delta: Delta,
+    pub delta: Delta,
     logprobs: Option<()>,      // null in JSON
     finish_reason: Option<()>, // null in JSON
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct DeltaContent {
-    content: String,
+    pub content: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]
-enum Delta {
+pub enum Delta {
     String(DeltaContent),
     Object(Value),
 }
@@ -70,7 +70,6 @@ async fn handle_streaming_response(
     let mut stream = response.bytes_stream();
 
     // Process the stream
-    let mut i = 0;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         if let Ok(s) = std::str::from_utf8(&chunk) {
@@ -80,10 +79,7 @@ async fn handle_streaming_response(
                     serde_json::from_str(s.trim_start_matches("data:").trim())?;
                 if let Delta::String(delta) = &stuff.choices[0].delta {
                     print!("{}", delta.content);
-                    if i % 3 == 0 {
-                        io::stdout().flush().unwrap();
-                        i += 1;
-                    }
+                    io::stdout().flush().unwrap();
                 }
             } else {
                 println!("{}", s);
