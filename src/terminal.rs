@@ -44,16 +44,17 @@ pub async fn terminal() -> Result<(), Box<dyn std::error::Error>> {
             indexing::index(&path).await?;
         }
         Mode::Query => {
-            let prompt = Text::new("Enter your query:").prompt()?;
-            let repo = Select::new("Enter repository name:", vec!["*"]).prompt()?;
-            let docs = rag(&prompt, repo).await?;
+            let collection = Text::new("Enter collection name:").prompt()?;
+            let repo = Text::new("Enter repository name:").prompt()?;
+            let prompt = Text::new("Enter query:").prompt()?;
+            let docs = rag(&prompt, &collection, &repo).await?;
             println!("{:#?}", docs);
         }
         Mode::Thing => {
             let prompt = Text::new("Prompt:").prompt()?;
             ask_llm(
                 "http://localhost:1234/v1/chat/completions",
-                "lm-studio",            // LM Studio typically uses this as API key
+                "lm-studio",
                 "qwen/qwen3-coder-30b", // Your model name
                 &prompt,
             )
